@@ -1,9 +1,117 @@
 """
 id, name, email, password, profile
 """
-# jsonify : dicitionary --> JSON --> HTTP Response
+# jsonify : dictionary --> JSON --> HTTP Response
 from flask      import Flask, jsonify, request
 from flask.json import JSONEncoder
+from sqlalchemy import create_engine, text
+
+
+"""
+To Avoid JSON seializable ERROR
+CustomJsonEncoder Class has been added
+Change SET to LIST
+"""
+class CustomJSONEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, set):
+            return list(obj)
+
+        return JSONEncoder.default(self, obj)
+
+app.json_encoder = CustomJSONEncoder
+
+
+# Connect DB
+def get_user(user_id):
+    user = current.app.database.execute("""
+        SELECT
+            id,
+            name,
+            email,
+            profile
+        FROM users
+        WHERE id =: user_id
+    """), {
+        'user_id' : user_id
+    }).fetchone()
+
+    return {
+        'id'      : user['id'],
+        'name'    : user['name'],
+        'email'   : user['email'],
+        'profile' : user['profile']
+    } if user else None
+
+
+def insert_user(user):
+    return current_app.database.execute(text("""
+        INSERT INTO users (
+            name,
+            email,
+            profile,
+            hashed_password
+        ) VALUES (
+            : name,
+            : email,
+            : profile,
+            : password
+        )
+    """), user).lastrowid
+
+
+def insert_tweet(user_tweet):
+    return current_app.database.execute(text("""
+        INSERT INTP tweets(
+            user_id,
+            tweet
+        ) VALUES (
+            :id,
+            :tweet
+        )
+    """), user_tweet).rowcount
+
+
+def insert_unfollow(user_unfollow):
+    return current_app.database.execute(text("""
+        DELETE FROM users_follow_list
+        WHERE user_id =: id
+        AND follow_user_id =: unfollow
+    """), user_unfollow).rowcount
+
+
+def get_timeline(user_id):
+    timeline = current_app.database.execute(text("""
+        SELECT
+            t.user_id,
+            t.tweet
+        FROM tweets t
+        LEFT JOIN users_follow_list ufl ON ufl.user_id =: user_id
+        WHERE t.user_id =: user_id
+        OR t.user_id = ufl.follow_user_id
+    """), {
+        'user_id' : user_id
+    }).fetchall()
+
+
+def create_app(test_config = None):
+    app = Flask(__name__)
+
+    if test_config is None:
+        app.config.from_pyfile('config.py')
+
+    else:
+        app.config.update(test_config)
+
+    database = create_engine(
+        app.config['DB_URL'], 
+        encoding = 'utf-8', 
+        max_overflow = 0
+    )
+    app.database = database
+
+    return app
+
 
 app          = Flask(__name__)
 app.users    = {}
@@ -81,19 +189,6 @@ def unfollow():
 
     return jsonify(user)
 
-
-"""
-To Avoid JSON seializable ERROR
-CustomJsonEncoder Class has been added
-"""
-class CustomJSONEncoder(JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, set):
-            return list(obj)
-
-        return JSONEncoder.default(self, obj)
-
-app.json_encoder = CustomJSONEncoder
 
 
 """
