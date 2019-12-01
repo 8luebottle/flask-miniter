@@ -28,7 +28,6 @@ def sign_up():
 tweet id 
 tweet contents
 """
-
 app.tweets = []
 
 @app.route('/tweet', methods=['POST'])
@@ -59,10 +58,6 @@ def follow():
     user_id   = int(payload['id'])
     follow_id = int(payload['follow'])
 
-    print('************* payload: ', payload)
-    print('\nchecking user id: ', user_id)
-    print('\nchecing data : ', app.users)
-
     if user_id not in app.users or follow_id not in app.users:
         return 'User Does Not Exist', 400
 
@@ -72,11 +67,25 @@ def follow():
     return jsonify(user)
 
 
+@app.route('/unfollow', methods=['POST'])
+def unfollow():
+    payload     = request.json
+    user_id     = int(payload['id'])
+    unfollow_id = int(payload['unfollow'])
+
+    if user_id not in app.users or unfollow_id not in app.users:
+        return 'User Does Not Exist', 400
+
+    user = app.users[user_id]
+    user.setdefault('follow', set()).discard(unfollow_id)
+
+    return jsonify(user)
+
+
 """
 To Avoid JSON seializable ERROR
 CustomJsonEncoder Class has been added
 """
-
 class CustomJSONEncoder(JSONEncoder):
     def default(self, obj):
         if isinstance(obj, set):
@@ -86,4 +95,28 @@ class CustomJSONEncoder(JSONEncoder):
 
 app.json_encoder = CustomJSONEncoder
 
+
+"""
+TIME LINE
+- user id
+- follower's tweet list
+- follower's id
+- tweet contents
+"""
+@app.route('/timeline/<int:user_id>', methods=['GET'])
+def timeline(user_id):
+    if user_id not in app.users:
+        return 'User Does Not Exist', 400
+
+    follow_list = app.users[user_id].get('follow', set())
+    follow_list.add(user_id)
+    timeline = [tweet for tweet in app.tweets 
+                if tweet['user_id'] in follow_list]
+
+    return jsonify(
+        {
+            'user_id' : user_id,
+            'timeline': timeline
+        }
+    )
 
