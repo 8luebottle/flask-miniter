@@ -2,7 +2,10 @@
 id, name, email, password, profile
 """
 # jsonify : dictionary --> JSON --> HTTP Response
-from flask      import Flask, jsonify, request
+import bcrypt
+import jwt
+
+from flask      import Flask, jsonify, request, current_app
 from flask.json import JSONEncoder
 from sqlalchemy import create_engine, text
 
@@ -19,12 +22,10 @@ class CustomJSONEncoder(JSONEncoder):
 
         return JSONEncoder.default(self, obj)
 
-app.json_encoder = CustomJSONEncoder
-
 
 # Connect DB
 def get_user(user_id):
-    user = current.app.database.execute("""
+    user = current_app.database.execute(text("""
         SELECT
             id,
             name,
@@ -52,17 +53,17 @@ def insert_user(user):
             profile,
             hashed_password
         ) VALUES (
-            : name,
-            : email,
-            : profile,
-            : password
+            :name,
+            :email,
+            :profile,
+            :password
         )
     """), user).lastrowid
 
 
 def insert_tweet(user_tweet):
     return current_app.database.execute(text("""
-        INSERT INTP tweets(
+        INSERT INTO tweets(
             user_id,
             tweet
         ) VALUES (
@@ -82,24 +83,31 @@ def insert_unfollow(user_unfollow):
 
 def get_timeline(user_id):
     timeline = current_app.database.execute(text("""
-        SELECT
+        SELECT 
             t.user_id,
             t.tweet
         FROM tweets t
-        LEFT JOIN users_follow_list ufl ON ufl.user_id =: user_id
-        WHERE t.user_id =: user_id
+        LEFT JOIN users_follow_list ufl ON ufl.user_id = :user_id
+        WHERE t.user_id = :user_id 
         OR t.user_id = ufl.follow_user_id
     """), {
-        'user_id' : user_id
+        'user_id' : user_id 
     }).fetchall()
 
 
+    return [{
+        'user_id' : tweet['user_id'],
+        'tweet'   : tweet['tweet']
+    } for tweet in timeline]
+
+
+# APP
 def create_app(test_config = None):
     app = Flask(__name__)
+    app.json_encoder = CustomJSONEncoder
 
     if test_config is None:
         app.config.from_pyfile('config.py')
-
     else:
         app.config.update(test_config)
 
@@ -110,108 +118,111 @@ def create_app(test_config = None):
     )
     app.database = database
 
+
+    @app.route('/ping', methods=['GET'])
+    def ping():
+        return 'pong'
+
+
+    @app.route('/sign-up', methods=['POST'])
+    def sign_up():
+        new_user             = request.json
+        new_user['password'] = bcrypt.hashpw(
+            new_user['password'].encode('UTF-8'),
+            bcrypt.gensalt()
+        )
+        new_user_id = app.database.execute(text("""
+            INSERT INTO users (
+                name,
+                email,
+                profile,
+                hashed_password
+            ) VALUES (
+                :name,
+                :email,
+                :profile,
+                :password
+            )
+        """), new_user).lastrowid
+        new_user_info = get_user(new_user_id)
+
+        return jsonify(new_user_info)
+
+
+    @app.route('/login', methods=['POST'])
+    def login():
+        credential = request.json
+        email      = credential['email']
+        password   = credential['password']
+
+        row = database.execute(text("""
+            SELECT
+                id,
+                hashed_password
+            FROM users
+            WHERE email = :email
+        """), {'email' : email}.fetchone()
+
+        if row and bcrypt.checkpw(password.encode('UTF-8'), 
+            row['hashed_password'].encode('UTF-8')):
+                user_id = row['id']
+                payload = {
+                    'user_id' : user_id,
+                    'exp'     : datetime.utcnow() + timedelta(seconds = 60* 60 * 24)
+                }
+                token = jwt.encode(payload, app.config['JWT'], 'HS256')
+
+            return jsonify({
+                'access_token' : token.decode('UTF-8')
+            })
+        else:
+            return '', 401
+
+
+    # Tweet id, Tweet content
+    @app.route('/tweet', methods=['POST'])
+    def tweet():
+        user_tweet = request.json
+        tweet      = user_tweet['tweet']
+
+        if len(tweet) > 300:
+            return "You've Reached The Limit of 300", 400
+
+        insert_tweet(user_tweet)
+
+        return '', 200
+
+
+    @app.route('/follow', methods=['POST'])
+    def follow():
+        payload   = request.json
+        insert_follow(payload)
+
+        return '', 200
+
+
+    @app.route('/unfollow', methods=['POST'])
+    def unfollow():
+        payload     = request.json
+        insert_unfollow(payload)
+
+        return '', 200
+
+
+    """
+    TIME LINE
+    - user id
+    - follower's tweet list
+    - follower's id
+    - tweet contents
+    """
+    @app.route('/timeline/<int:user_id>', methods=['GET'])
+    def timeline(user_id):
+        return jsonify(
+            {
+                'user_id' : user_id,
+                'timeline': get_timeline(user_id)
+            }
+        )
+
     return app
-
-
-app          = Flask(__name__)
-app.users    = {}
-app.id_count = 1
-
-@app.route('/ping', methods=['GET'])
-def ping():
-    return 'pong'
-
-
-@app.route('/sign-up', methods=['POST'])
-def sign_up():
-    new_user                = request.json
-    new_user['id']          = app.id_count
-    app.users[app.id_count] = new_user
-    app.id_count            = app.id_count + 1
-
-    return jsonify(new_user)
-
-
-"""
-tweet id 
-tweet contents
-"""
-app.tweets = []
-
-@app.route('/tweet', methods=['POST'])
-def tweet():
-    payload = request.json
-    user_id = int(payload['id'])
-    tweet = payload['tweet']
-
-    if user_id not in app.users:
-        return 'User doens not exists', 400
-
-    if len(tweet) > 300:
-        return "You've Reached The Limit of 300", 400
-
-    user_id = int(payload['id'])
-
-    app.tweets.append({
-        'user_id' : user_id,
-        'tweet'   : tweet
-    })
-
-    return '', 200
-
-
-@app.route('/follow', methods=['POST'])
-def follow():
-    payload   = request.json
-    user_id   = int(payload['id'])
-    follow_id = int(payload['follow'])
-
-    if user_id not in app.users or follow_id not in app.users:
-        return 'User Does Not Exist', 400
-
-    user = app.users[user_id]
-    user.setdefault('follow', set()).discard(follow_id)
-
-    return jsonify(user)
-
-
-@app.route('/unfollow', methods=['POST'])
-def unfollow():
-    payload     = request.json
-    user_id     = int(payload['id'])
-    unfollow_id = int(payload['unfollow'])
-
-    if user_id not in app.users or unfollow_id not in app.users:
-        return 'User Does Not Exist', 400
-
-    user = app.users[user_id]
-    user.setdefault('follow', set()).discard(unfollow_id)
-
-    return jsonify(user)
-
-
-
-"""
-TIME LINE
-- user id
-- follower's tweet list
-- follower's id
-- tweet contents
-"""
-@app.route('/timeline/<int:user_id>', methods=['GET'])
-def timeline(user_id):
-    if user_id not in app.users:
-        return 'User Does Not Exist', 400
-
-    follow_list = app.users[user_id].get('follow', set())
-    follow_list.add(user_id)
-    timeline = [tweet for tweet in app.tweets 
-                if tweet['user_id'] in follow_list]
-
-    return jsonify(
-        {
-            'user_id' : user_id,
-            'timeline': timeline
-        }
-    )
-
