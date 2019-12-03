@@ -5,7 +5,7 @@
 - Log In
 - Tweet
 - Follow
-- Unfllow
+- Unfollow
 - Timeline
 
 ## Getting Started
