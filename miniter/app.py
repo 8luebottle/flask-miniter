@@ -99,7 +99,6 @@ def get_timeline(user_id):
         'user_id' : user_id 
     }).fetchall()
 
-
     return [{
         'user_id' : tweet['user_id'],
         'tweet'   : tweet['tweet']
