@@ -8,6 +8,7 @@ import jwt
 from flask      import (
         Flask, jsonify, current_app,
         request, Response, g)
+from flask_cors import CORS, cross_origin
 from flask.json import JSONEncoder
 from functools  import wraps
 from sqlalchemy import create_engine, text
@@ -35,7 +36,7 @@ def get_user(user_id):
             email,
             profile
         FROM users
-        WHERE id =: user_id
+        WHERE id = :user_id
     """), {
         'user_id' : user_id
     }).fetchone()
@@ -111,7 +112,11 @@ def login_required(f):
         access_token = request.headers.get('Authorization')
         if access_token is not None:
             try:
-                payload = jwt.decode(access_token, current_app.config['JWT_SECRET_KEY'], 'HS256')
+                payload = jwt.decode(
+                    access_token, 
+                    current_app.config['JWT_SECRET_KEY'], 
+                    'HS256'
+                )
             except jwt.InvalidTokenError:
                 payload = None
 
@@ -133,6 +138,9 @@ def login_required(f):
 def create_app(test_config = None):
     app = Flask(__name__)
     app.json_encoder = CustomJSONEncoder
+
+    # Fix the CORS Error
+    CORS(app)
 
     if test_config is None:
         app.config.from_pyfile('config.py')
@@ -159,22 +167,10 @@ def create_app(test_config = None):
             new_user['password'].encode('UTF-8'),
             bcrypt.gensalt()
         )
-        new_user_id = app.database.execute(text("""
-            INSERT INTO users (
-                name,
-                email,
-                profile,
-                hashed_password
-            ) VALUES (
-                :name,
-                :email,
-                :profile,
-                :password
-            )
-        """), new_user).lastrowid
-        new_user_info = get_user(new_user_id)
+        new_user_id = insert_user(new_user) 
+        new_user    = get_user(new_user_id)
 
-        return jsonify(new_user_info)
+        return jsonify(new_user)
 
 
     @app.route('/login', methods=['POST'])
@@ -208,8 +204,9 @@ def create_app(test_config = None):
     @app.route('/tweet', methods=['POST'])
     @login_required
     def tweet():
-        user_tweet = request.json
-        tweet      = user_tweet['tweet']
+        user_tweet       = request.json
+        user_tweet['id'] = g.user_id
+        tweet            = user_tweet['tweet']
 
         if len(tweet) > 300:
             return "You've Reached The Limit of 300", 400
@@ -222,7 +219,9 @@ def create_app(test_config = None):
     @app.route('/follow', methods=['POST'])
     @login_required
     def follow():
-        payload   = request.json
+        payload       = request.json
+        payload['id'] = g.user_id
+
         insert_follow(payload)
 
         return '', 200
@@ -231,7 +230,9 @@ def create_app(test_config = None):
     @app.route('/unfollow', methods=['POST'])
     @login_required
     def unfollow():
-        payload     = request.json
+        payload       = request.json
+        payload['id'] = g.user_id
+
         insert_unfollow(payload)
 
         return '', 200
@@ -246,6 +247,8 @@ def create_app(test_config = None):
     """
     @app.route('/timeline/<int:user_id>', methods=['GET'])
     def timeline(user_id):
+        user_id = g.user_id
+
         return jsonify(
             {
                 'user_id' : user_id,
