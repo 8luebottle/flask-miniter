@@ -5,6 +5,7 @@ id, name, email, password, profile
 import bcrypt
 import jwt
 
+from datetime   import datetime, timedelta
 from flask      import (
         Flask, jsonify, current_app,
         request, Response, g)
@@ -105,6 +106,16 @@ def get_timeline(user_id):
     } for tweet in timeline]
 
 
+def get_user_id_pw(email):
+    user_data = current_app.database.execute(text("""
+        SELECT
+            id,
+            hashed_password
+        FROM users
+        WHERE users.email = :email
+    """), { 'email' : email}).fetchone()
+
+
 # DECORATOR
 def login_required(f):
     @wraps(f)
@@ -178,7 +189,7 @@ def create_app(test_config = None):
         credential      = request.json
         email           = credential['email']
         password        = credential['password']
-        user_credential = get_user_id_and_password(email)
+        user_credential = get_user_id_pw(email)
 
         if user_credential and bcrypt.checkpw(password.encode('UTF-8'), 
             user_credential['hashed_password'].encode('UTF-8')):
