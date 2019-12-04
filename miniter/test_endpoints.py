@@ -49,3 +49,27 @@ def test_tweet(api):
     )
     rest_json    = json.loads(resp.data.decode('UTF-8'))
     access_token = resp_json['access_token']
+
+    # TWEET TEST
+    resp = api.post(
+        '/tweet',
+        data         = json.dumps({ 'tweet' : 'Hellow World!' }),
+        content_type = 'application/json',
+        headers      = {'Authorization' : access_token}
+    )
+    assert resp.status_code == 200
+
+    # CHECK UP TWEET
+    resp   = api.get(f'/timeline/{new_user_id}')
+    tweets = json.loads(resp.data.decode('UTF-8')) 
+
+    assert resp.status_code == 200
+    assert tweets == {
+        'user_id' : 1,
+        'timeline': [
+            {
+                'user_id' : 1,
+                'tweet'   : 'Hello World!'
+            }
+        ]
+    }
