@@ -1,10 +1,10 @@
 import jwt
 
+from flask.json import JSONEncoder
+from functools  import wraps
 from flask      import (
     current_app, jsonify, request,
     Response, g)
-from flask.json import JSONEncoder
-from functools  import wraps
 
 class CustomJSONEncoder(JSONENcoder):
     def default(self, obj):
